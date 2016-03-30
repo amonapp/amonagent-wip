@@ -1,0 +1,69 @@
+'qcur': ('queued_request_count', 'gauge'),
+  "qmax": ("peak_queued_request_count", "gauge"),
+  'scur': ('current_session_count', 'gauge'),
+  "smax": ("peak_session_count", "gauge"),
+  "slim": ("max_sessions", "gauge"),
+  'stot': ('session_count', 'counter'),
+  'bin': ('bytes_in', 'gauge'),
+  'bout': ('bytes_out', 'gauge'),
+  'dreq': ('denied_request_count', 'counter'),
+  'dresp': ('denied_response_count', 'counter'),
+  'ereq': ('error_request_count', 'counter'),
+  'econ': ('error_connection_count', 'counter'),
+  'eresp': ('error_response_count', 'counter'),
+  'wretr': ('conn_retry_count', 'counter'),
+  'wredis': ('redispatch_count', 'counter'),
+  "weight": ("server_weight", "gauge"),
+  "act": ("active_server_count", "gauge"),
+  "bck": ("backup_server_count", "gauge"),
+  'chkfail': ('failed_check_count', 'counter'),
+  "chkdown": ("down_transition_count", "counter"),
+  "lastchg": ("last_change_seconds", "counter"),
+  'downtime': ('downtime_seconds', 'counter'),
+  "qlimit": ("max_queue", "gauge"),
+  "throttle": ("throttle_pct", "gauge"),
+  "lbtot": ("selection_count", "counter"),
+  'rate': ('session_rate', 'gauge'),
+  "rate_lim": ("max_session_rate", "gauge"),
+  "rate_max": ("peak_session_rate", "gauge"),
+  "check_duration": ("check_duration", "derive"),
+  'hrsp_1xx': ('http_response_1xx', 'counter'),
+  'hrsp_2xx': ('http_response_2xx', 'counter'),
+  'hrsp_3xx': ('http_response_3xx', 'counter'),
+  'hrsp_4xx': ('http_response_4xx', 'counter'),
+  'hrsp_5xx': ('http_response_5xx', 'counter'),
+  'hrsp_other': ('http_response_other', 'counter'),
+  'req_rate': ('request_rate', 'gauge'),
+  "req_rate_max": ("peak_request_rate", "gauge"),
+  "req_tot": ("request_count", "counter"),
+  "cli_abrt": ("client_abort_count", "counter"),
+  "srv_abrt": ("server_abort_count", "counter"),
+
+
+
+
+  "qcur": ("gauge", "queue.current"),
+  "scur": ("gauge", "session.current"),
+  "slim": ("gauge", "session.limit"),
+  "spct": ("gauge", "session.pct"),    # Calculated as: (scur/slim)*100
+  "stot": ("rate", "session.rate"),
+  "bin": ("rate", "bytes.in_rate"),
+  "bout": ("rate", "bytes.out_rate"),
+  "dreq": ("rate", "denied.req_rate"),
+  "dresp": ("rate", "denied.resp_rate"),
+  "ereq": ("rate", "errors.req_rate"),
+  "econ": ("rate", "errors.con_rate"),
+  "eresp": ("rate", "errors.resp_rate"),
+  "wretr": ("rate", "warnings.retr_rate"),
+  "wredis": ("rate", "warnings.redis_rate"),
+  "req_rate": ("gauge", "requests.rate"), # HA Proxy 1.4 and higher
+  "hrsp_1xx": ("rate", "response.1xx"),  # HA Proxy 1.4 and higher
+  "hrsp_2xx": ("rate", "response.2xx"), # HA Proxy 1.4 and higher
+  "hrsp_3xx": ("rate", "response.3xx"), # HA Proxy 1.4 and higher
+  "hrsp_4xx": ("rate", "response.4xx"), # HA Proxy 1.4 and higher
+  "hrsp_5xx": ("rate", "response.5xx"), # HA Proxy 1.4 and higher
+  "hrsp_other": ("rate", "response.other"), # HA Proxy 1.4 and higher
+  "qtime": ("gauge", "queue.time"),  # HA Proxy 1.5 and higher
+  "ctime": ("gauge", "connect.time"),  # HA Proxy 1.5 and higher
+  "rtime": ("gauge", "response.time"),  # HA Proxy 1.5 and higher
+  "ttime": ("gauge", "session.time"),  # HA Proxy 1.5 and higher
