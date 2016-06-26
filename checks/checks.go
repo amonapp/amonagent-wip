@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os/exec"
 	"strings"
+	"sync"
 	"syscall"
 )
 
@@ -22,12 +23,63 @@ type CommandResult struct {
 	Command  string `json:"command"`
 }
 
+// Checks - XXX
+type Checks struct {
+	Config Config
+}
+
+// Description - XXX
+func (c *Checks) Description() string {
+	return "Collects data from Sensu plugins"
+}
+
+var sampleConfig = `
+#   Available config options:
+#
+#    [
+#        "metrics-es-node-graphite.rb",
+#        "metrics-net.rb",
+#        "metrics-redis-graphite.rb",
+#        "metrics-iostat-extended.rb"
+#    ]
+#
+#    List of preinstalled sensu plugins + params
+#
+# Config location: /etc/opt/amonagent/plugins-enabled/checks.conf
+`
+
+// SampleConfig - XXX
+func (c *Checks) SampleConfig() string {
+	return sampleConfig
+}
+
+// Config - XXX
+type Config struct {
+	Commands []string `mapstructure:"commands"`
+}
+
+// SetConfigDefaults - XXX
+func (c *Checks) SetConfigDefaults(configPath string) error {
+	jsonFile, err := ioutil.ReadFile(configPath)
+	if err != nil {
+		fmt.Printf("Can't read config file: %s %v\n", configPath, err)
+	}
+	var Commands []string
+	if err := json.Unmarshal(jsonFile, &Commands); err != nil {
+		fmt.Printf("Can't decode JSON file: %v\n", err)
+	}
+
+	c.Config.Commands = Commands
+
+	return nil
+}
+
 // ExecWithExitCode - XXX
 // Source: http://stackoverflow.com/questions/10385551/get-exit-code-go
 func ExecWithExitCode(command string) (CommandResult, error) {
 	parts := strings.Fields(command)
 	head := parts[0]
-	parts = parts[1:len(parts)]
+	parts = parts[1:]
 	cmd := exec.Command(head, parts...)
 	output := CommandResult{Command: command}
 
@@ -60,30 +112,33 @@ func ExecWithExitCode(command string) (CommandResult, error) {
 }
 
 // Collect - XXX
-func Collect() error {
+func (c *Checks) Collect(configPath string) (interface{}, error) {
+	c.SetConfigDefaults(configPath)
+	var wg sync.WaitGroup
+	var result []CommandResult
 
-	file, err := ioutil.ReadFile("/etc/opt/amonagent/checks.conf")
-	if err != nil {
-		fmt.Printf("Can't read config file: %v\n", err)
+	for _, v := range c.Config.Commands {
+		wg.Add(1)
+
+		go func(command string) {
+
+			CheckResult, err := ExecWithExitCode(command)
+			if err != nil {
+				fmt.Println("Can't execute command: ", err)
+			}
+
+			result = append(result, CheckResult)
+			defer wg.Done()
+		}(v)
+
 	}
-	var arrayData []string
+	wg.Wait()
 
-	if err := json.Unmarshal(file, &arrayData); err != nil {
-
-		return err
-	}
-	for _, v := range arrayData {
-		result, err := ExecWithExitCode(v)
-		if err != nil {
-			fmt.Println("Can't execute command: ", err)
-		}
-		fmt.Println(result)
-
-	}
-
-	return nil
+	return result, nil
 }
 
 func main() {
-	Collect()
+	c := Checks{}
+
+	c.Collect("/etc/amonagent/plugins-enabled/checks.conf")
 }
