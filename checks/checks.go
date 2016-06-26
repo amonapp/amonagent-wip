@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 )
 
 func (c CommandResult) String() string {
@@ -21,6 +22,7 @@ type CommandResult struct {
 	ExitCode int    `json:"exit_code"`
 	Output   string `json:"output"`
 	Command  string `json:"command"`
+	Error    string `json:"error"`
 }
 
 // Checks - XXX
@@ -76,7 +78,7 @@ func (c *Checks) SetConfigDefaults(configPath string) error {
 
 // ExecWithExitCode - XXX
 // Source: http://stackoverflow.com/questions/10385551/get-exit-code-go
-func ExecWithExitCode(command string) (CommandResult, error) {
+func ExecWithExitCode(command string) CommandResult {
 	parts := strings.Fields(command)
 	head := parts[0]
 	parts = parts[1:]
@@ -87,7 +89,8 @@ func ExecWithExitCode(command string) (CommandResult, error) {
 	cmd.Stdout = &out
 
 	if err := cmd.Start(); err != nil {
-		return output, err
+		output.Error = err.Error()
+
 	}
 
 	if err := cmd.Wait(); err != nil {
@@ -102,12 +105,18 @@ func ExecWithExitCode(command string) (CommandResult, error) {
 				output.ExitCode = status.ExitStatus()
 			}
 		} else {
-			return output, err
+			output.Error = err.Error()
 		}
 	}
+
+	timer := time.AfterFunc(10*time.Second, func() {
+		cmd.Process.Kill()
+	})
+	timer.Stop()
+
 	output.Output = out.String()
 
-	return output, nil
+	return output
 
 }
 
@@ -117,22 +126,26 @@ func (c *Checks) Collect(configPath string) (interface{}, error) {
 	var wg sync.WaitGroup
 	var result []CommandResult
 
+	resultChan := make(chan CommandResult, len(c.Config.Commands))
+
 	for _, v := range c.Config.Commands {
 		wg.Add(1)
 
 		go func(command string) {
 
-			CheckResult, err := ExecWithExitCode(command)
-			if err != nil {
-				fmt.Println("Can't execute command: ", err)
-			}
+			CheckResult := ExecWithExitCode(command)
 
-			result = append(result, CheckResult)
+			resultChan <- CheckResult
 			defer wg.Done()
 		}(v)
 
 	}
 	wg.Wait()
+	close(resultChan)
+
+	for i := range resultChan {
+		result = append(result, i)
+	}
 
 	return result, nil
 }
@@ -140,5 +153,7 @@ func (c *Checks) Collect(configPath string) (interface{}, error) {
 func main() {
 	c := Checks{}
 
-	c.Collect("/etc/amonagent/plugins-enabled/checks.conf")
+	result, _ := c.Collect("/etc/amonagent/plugins-enabled/checks.conf")
+
+	fmt.Println(result)
 }
