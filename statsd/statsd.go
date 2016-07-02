@@ -214,30 +214,10 @@ func (_ *Statsd) Description() string {
 
 const sampleConfig = `
   ## Address and port to host UDP listener on
-  service_address = ":8125"
-  ## Delete gauges every interval (default=false)
-  delete_gauges = false
-  ## Delete counters every interval (default=false)
-  delete_counters = false
-  ## Delete sets every interval (default=false)
-  delete_sets = false
-  ## Delete timings & histograms every interval (default=true)
-  delete_timings = true
+  service_address = "8125"
   ## Percentiles to calculate for timing & histogram stats
   percentiles = [90]
 
-  ## separator to use between elements of a statsd metric
-  metric_separator = "_"
-
-  ## Parses tags in the datadog statsd format
-  ## http://docs.datadoghq.com/guides/dogstatsd/
-  parse_data_dog_tags = false
-
-  ## Statsd data translation templates, more info can be read here:
-  ## https://github.com/influxdata/telegraf/blob/master/docs/DATA_FORMATS_INPUT.md#graphite
-  # templates = [
-  #     "cpu.* measurement*"
-  # ]
 
   ## Number of UDP messages allowed to queue up, once filled,
   ## the statsd server will start dropping packets
@@ -412,7 +392,7 @@ func (s *Statsd) parseStatsdLine(line string) error {
 	// Validate splitting the line on ":"
 	bits := strings.Split(line, ":")
 	if len(bits) < 2 {
-		log.Printf("Error: splitting ':', Unable to parse metric: %s\n", line)
+		// log.Printf("Error: splitting ':', Unable to parse metric: %s\n", line)
 		return errors.New("Error Parsing statsd line")
 	}
 
