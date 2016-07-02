@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -121,7 +122,7 @@ const (
 
 	defaultFieldName = "value"
 
-	defaultSeparator = "_"
+	defaultSeparator = "."
 )
 
 var dropwarn = "ERROR: statsd message queue full. " +
@@ -147,7 +148,6 @@ type Statsd struct {
 	DeleteCounters bool
 	DeleteSets     bool
 	DeleteTimings  bool
-	ConvertNames   bool
 
 	// MetricSeparator is the separator between parts of the metric name.
 	MetricSeparator string
@@ -208,36 +208,35 @@ type cachedtimings struct {
 	tags   map[string]string
 }
 
-// PerformanceStruct - XXX
-// type PerformanceStruct struct {
-// 	Gauges   map[string]interface{} `json:"gauges,omitempty"`
-// 	Counters map[string]interface{} `json:"counters,omitempty"`
-// }
+func (p PerformanceStruct) String() string {
+	s, _ := json.Marshal(p)
+	return string(s)
+}
 
-// func (p PerformanceStructBlock) String() string {
-// 	s, _ := json.Marshal(p)
-// 	return string(s)
-// }
+// PerformanceStruct - XXX
+type PerformanceStruct struct {
+	Gauges   map[string]interface{} `json:"gauges,omitempty"`   // Timers in StatsD are gauges in Amon (charts)
+	Counters map[string]interface{} `json:"counters,omitempty"` // Gauges in StatsD are counters in Amon (block with value)
+}
+
+func (p PerformanceStructBlock) String() string {
+	s, _ := json.Marshal(p)
+	return string(s)
+}
+
+// PerformanceStructBlock - XXX
+type PerformanceStructBlock map[string]PerformanceStruct
 
 func (_ *Statsd) Description() string {
 	return "Statsd Server"
 }
 
 const sampleConfig = `
-  ## Address and port to host UDP listener on
-  service_address = "8125"
-  ## Percentiles to calculate for timing & histogram stats
-  percentiles = [90]
-
-
-  ## Number of UDP messages allowed to queue up, once filled,
-  ## the statsd server will start dropping packets
-  allowed_pending_messages = 10000
-
-  ## Number of timing/histogram values to track per-measurement in the
-  ## calculation of percentiles. Raising this limit increases the accuracy
-  ## of percentiles but also increases the memory usage and cpu time.
-  percentile_limit = 1000
+#   Available config options:
+	{
+		"port": 8125 # Default
+	}
+# Config location: /etc/opt/amonagent/plugins-enabled/statsd.conf
 `
 
 func (_ *Statsd) SampleConfig() string {
@@ -247,6 +246,9 @@ func (_ *Statsd) SampleConfig() string {
 func (s *Statsd) Gather() error {
 	s.Lock()
 	defer s.Unlock()
+
+	timings := make(map[string]interface{})
+	gauges := make(map[string]interface{})
 
 	for _, metric := range s.timings {
 		// Defining a template to parse field names for timers allows us to split
@@ -269,23 +271,21 @@ func (s *Statsd) Gather() error {
 			}
 		}
 
-		fmt.Println(metric.name, fields)
-
-		// acc.AddFields(metric.name, fields, metric.tags)
+		timings[metric.name] = fields
 	}
 	if s.DeleteTimings {
 		s.timings = make(map[string]cachedtimings)
 	}
 
 	for _, metric := range s.gauges {
-		fmt.Println(metric.name, metric.fields)
+		gauges[metric.name] = metric.fields
 	}
 	if s.DeleteGauges {
 		s.gauges = make(map[string]cachedgauge)
 	}
 
 	for _, metric := range s.counters {
-		fmt.Println(metric.name, metric.fields)
+		gauges[metric.name] = metric.fields
 	}
 	if s.DeleteCounters {
 		s.counters = make(map[string]cachedcounter)
@@ -538,10 +538,6 @@ func (s *Statsd) parseName(bucket string) (string, string, map[string]string) {
 	var field string
 	name := bucketparts[0]
 
-	if s.ConvertNames {
-		name = strings.Replace(name, ".", "_", -1)
-		name = strings.Replace(name, "-", "__", -1)
-	}
 	if field == "" {
 		field = defaultFieldName
 	}
@@ -664,15 +660,9 @@ func (s *Statsd) Stop() {
 	close(s.in)
 }
 
-// func init() {
-// 	inputs.Add("statsd", func() telegraf.Input {
-// 		return &Statsd{
-// 			MetricSeparator: "_",
-// 		}
-// 	})
-// }
-
 func main() {
 	s := Statsd{}
 	s.Start()
+
+	// s.Gather()
 }
