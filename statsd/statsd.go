@@ -208,6 +208,17 @@ type cachedtimings struct {
 	tags   map[string]string
 }
 
+// PerformanceStruct - XXX
+// type PerformanceStruct struct {
+// 	Gauges   map[string]interface{} `json:"gauges,omitempty"`
+// 	Counters map[string]interface{} `json:"counters,omitempty"`
+// }
+
+// func (p PerformanceStructBlock) String() string {
+// 	s, _ := json.Marshal(p)
+// 	return string(s)
+// }
+
 func (_ *Statsd) Description() string {
 	return "Statsd Server"
 }
@@ -248,7 +259,7 @@ func (s *Statsd) Gather() error {
 				prefix = fieldName + "_"
 			}
 			fields[prefix+"mean"] = stats.Mean()
-			fields[prefix+"stddev"] = stats.Stddev()
+			fields[prefix+"deviation"] = stats.Stddev()
 			fields[prefix+"upper"] = stats.Upper()
 			fields[prefix+"lower"] = stats.Lower()
 			fields[prefix+"count"] = stats.Count()
