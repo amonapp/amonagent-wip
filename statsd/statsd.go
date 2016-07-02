@@ -1,21 +1,118 @@
-package statsd
+package main
 
 import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
+	"math/rand"
 	"net"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
-
-	"github.com/influxdata/telegraf/plugins/parsers/graphite"
-
-	"github.com/influxdata/telegraf"
-	"github.com/influxdata/telegraf/plugins/inputs"
 )
+
+const defaultPercentileLimit = 1000
+
+// RunningStats calculates a running mean, variance, standard deviation,
+// lower bound, upper bound, count, and can calculate estimated percentiles.
+// It is based on the incremental algorithm described here:
+//    https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
+type RunningStats struct {
+	k   float64
+	n   int64
+	ex  float64
+	ex2 float64
+
+	// Array used to calculate estimated percentiles
+	// We will store a maximum of PercLimit values, at which point we will start
+	// randomly replacing old values, hence it is an estimated percentile.
+	perc      []float64
+	PercLimit int
+
+	upper float64
+	lower float64
+
+	// cache if we have sorted the list so that we never re-sort a sorted list,
+	// which can have very bad performance.
+	sorted bool
+}
+
+func (rs *RunningStats) AddValue(v float64) {
+	// Whenever a value is added, the list is no longer sorted.
+	rs.sorted = false
+
+	if rs.n == 0 {
+		rs.k = v
+		rs.upper = v
+		rs.lower = v
+		if rs.PercLimit == 0 {
+			rs.PercLimit = defaultPercentileLimit
+		}
+		rs.perc = make([]float64, 0, rs.PercLimit)
+	}
+
+	// These are used for the running mean and variance
+	rs.n += 1
+	rs.ex += v - rs.k
+	rs.ex2 += (v - rs.k) * (v - rs.k)
+
+	// track upper and lower bounds
+	if v > rs.upper {
+		rs.upper = v
+	} else if v < rs.lower {
+		rs.lower = v
+	}
+
+	if len(rs.perc) < rs.PercLimit {
+		rs.perc = append(rs.perc, v)
+	} else {
+		// Reached limit, choose random index to overwrite in the percentile array
+		rs.perc[rand.Intn(len(rs.perc))] = v
+	}
+}
+
+func (rs *RunningStats) Mean() float64 {
+	return rs.k + rs.ex/float64(rs.n)
+}
+
+func (rs *RunningStats) Variance() float64 {
+	return (rs.ex2 - (rs.ex*rs.ex)/float64(rs.n)) / float64(rs.n)
+}
+
+func (rs *RunningStats) Stddev() float64 {
+	return math.Sqrt(rs.Variance())
+}
+
+func (rs *RunningStats) Upper() float64 {
+	return rs.upper
+}
+
+func (rs *RunningStats) Lower() float64 {
+	return rs.lower
+}
+
+func (rs *RunningStats) Count() int64 {
+	return rs.n
+}
+
+func (rs *RunningStats) Percentile(n int) float64 {
+	if n > 100 {
+		n = 100
+	}
+
+	if !rs.sorted {
+		sort.Float64s(rs.perc)
+		rs.sorted = true
+	}
+
+	i := int(float64(len(rs.perc)) * float64(n) / float64(100))
+	if i < 0 {
+		i = 0
+	}
+	return rs.perc[i]
+}
 
 const (
 	// UDP packet limit, see
@@ -27,7 +124,8 @@ const (
 	defaultSeparator = "_"
 )
 
-var dropwarn = "ERROR: Message queue full. Discarding line [%s] " +
+var dropwarn = "ERROR: statsd message queue full. " +
+	"We have dropped %d messages so far. " +
 	"You may want to increase allowed_pending_messages in the config\n"
 
 var prevInstance *Statsd
@@ -53,15 +151,6 @@ type Statsd struct {
 
 	// MetricSeparator is the separator between parts of the metric name.
 	MetricSeparator string
-	// This flag enables parsing of tags in the dogstatsd extention to the
-	// statsd protocol (http://docs.datadoghq.com/guides/dogstatsd/)
-	ParseDataDogTags bool
-
-	// UDPPacketSize is deprecated, it's only here for legacy support
-	// we now always create 1 max size buffer and then copy only what we need
-	// into the in channel
-	// see https://github.com/influxdata/telegraf/pull/992
-	UDPPacketSize int `toml:"udp_packet_size"`
 
 	sync.Mutex
 	wg sync.WaitGroup
@@ -77,9 +166,6 @@ type Statsd struct {
 	counters map[string]cachedcounter
 	sets     map[string]cachedset
 	timings  map[string]cachedtimings
-
-	// bucket -> influx templates
-	Templates []string
 
 	listener *net.UDPConn
 }
@@ -167,10 +253,9 @@ func (_ *Statsd) SampleConfig() string {
 	return sampleConfig
 }
 
-func (s *Statsd) Gather(acc telegraf.Accumulator) error {
+func (s *Statsd) Gather() error {
 	s.Lock()
 	defer s.Unlock()
-	now := time.Now()
 
 	for _, metric := range s.timings {
 		// Defining a template to parse field names for timers allows us to split
@@ -193,21 +278,23 @@ func (s *Statsd) Gather(acc telegraf.Accumulator) error {
 			}
 		}
 
-		acc.AddFields(metric.name, fields, metric.tags, now)
+		fmt.Println(metric.name, fields)
+
+		// acc.AddFields(metric.name, fields, metric.tags)
 	}
 	if s.DeleteTimings {
 		s.timings = make(map[string]cachedtimings)
 	}
 
 	for _, metric := range s.gauges {
-		acc.AddFields(metric.name, metric.fields, metric.tags, now)
+		fmt.Println(metric.name, metric.fields)
 	}
 	if s.DeleteGauges {
 		s.gauges = make(map[string]cachedgauge)
 	}
 
 	for _, metric := range s.counters {
-		acc.AddFields(metric.name, metric.fields, metric.tags, now)
+		fmt.Println(metric.name, metric.fields)
 	}
 	if s.DeleteCounters {
 		s.counters = make(map[string]cachedcounter)
@@ -218,7 +305,7 @@ func (s *Statsd) Gather(acc telegraf.Accumulator) error {
 		for field, set := range metric.fields {
 			fields[field] = int64(len(set))
 		}
-		acc.AddFields(metric.name, fields, metric.tags, now)
+		fmt.Println(metric.name, fields)
 	}
 	if s.DeleteSets {
 		s.sets = make(map[string]cachedset)
@@ -227,7 +314,7 @@ func (s *Statsd) Gather(acc telegraf.Accumulator) error {
 	return nil
 }
 
-func (s *Statsd) Start(_ telegraf.Accumulator) error {
+func (s *Statsd) Start() error {
 	// Make data structures
 	s.done = make(chan struct{})
 	s.in = make(chan []byte, s.AllowedPendingMessages)
@@ -242,11 +329,6 @@ func (s *Statsd) Start(_ telegraf.Accumulator) error {
 		s.counters = prevInstance.counters
 		s.sets = prevInstance.sets
 		s.timings = prevInstance.timings
-	}
-
-	if s.ConvertNames {
-		log.Printf("WARNING statsd: convert_names config option is deprecated," +
-			" please use metric_separator instead")
 	}
 
 	if s.MetricSeparator == "" {
@@ -326,41 +408,6 @@ func (s *Statsd) parseStatsdLine(line string) error {
 	defer s.Unlock()
 
 	lineTags := make(map[string]string)
-	if s.ParseDataDogTags {
-		recombinedSegments := make([]string, 0)
-		// datadog tags look like this:
-		// users.online:1|c|@0.5|#country:china,environment:production
-		// users.online:1|c|#sometagwithnovalue
-		// we will split on the pipe and remove any elements that are datadog
-		// tags, parse them, and rebuild the line sans the datadog tags
-		pipesplit := strings.Split(line, "|")
-		for _, segment := range pipesplit {
-			if len(segment) > 0 && segment[0] == '#' {
-				// we have ourselves a tag; they are comma separated
-				tagstr := segment[1:]
-				tags := strings.Split(tagstr, ",")
-				for _, tag := range tags {
-					ts := strings.Split(tag, ":")
-					var k, v string
-					switch len(ts) {
-					case 1:
-						// just a tag
-						k = ts[0]
-						v = ""
-					case 2:
-						k = ts[0]
-						v = ts[1]
-					}
-					if k != "" {
-						lineTags[k] = v
-					}
-				}
-			} else {
-				recombinedSegments = append(recombinedSegments, segment)
-			}
-		}
-		line = strings.Join(recombinedSegments, "|")
-	}
 
 	// Validate splitting the line on ":"
 	bits := strings.Split(line, ":")
@@ -499,11 +546,6 @@ func (s *Statsd) parseName(bucket string) (string, string, map[string]string) {
 
 	var field string
 	name := bucketparts[0]
-	p, err := graphite.NewGraphiteParser(s.MetricSeparator, s.Templates, nil)
-	if err == nil {
-		p.DefaultTags = tags
-		name, tags, field, _ = p.ApplyTemplate(name)
-	}
 
 	if s.ConvertNames {
 		name = strings.Replace(name, ".", "_", -1)
@@ -631,10 +673,15 @@ func (s *Statsd) Stop() {
 	close(s.in)
 }
 
-func init() {
-	inputs.Add("statsd", func() telegraf.Input {
-		return &Statsd{
-			MetricSeparator: "_",
-		}
-	})
+// func init() {
+// 	inputs.Add("statsd", func() telegraf.Input {
+// 		return &Statsd{
+// 			MetricSeparator: "_",
+// 		}
+// 	})
+// }
+
+func main() {
+	s := Statsd{}
+	s.Start()
 }
